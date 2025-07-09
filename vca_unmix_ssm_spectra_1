@@ -1,0 +1,137 @@
+% Project: Spectral Unmixing with VCA and Reference Matching
+% Developed by: Vipul Vishal
+% Date: March-2025
+
+clear;
+clc;
+close all;
+
+%% Import and Preprocess Image Data (Spectral Bands)
+rawData1 = imread('methylen_eosin_anotated_blue1.jpg');  % 520 nm band
+rawData2 = imread('methylen_eosin_anotated_green1.jpg');   % 680 nm band
+rawData3 = imread('methylen_eosin_anotated_red1.jpg');  % 460 nm band
+
+% Convert images to grayscale
+x1 = rgb2gray(rawData1);
+x2 = rgb2gray(rawData2);
+x3 = rgb2gray(rawData3);
+
+% Compose the multispectral image matrix
+xt(1,:,:) = x1;  % First band (460 nm)
+xt(2,:,:) = x2;  % Second band (520 nm)
+xt(3,:,:) = x3;  % Third band (680 nm)
+xd = im2double(xt);
+
+%% Load and Normalize Reference Spectra
+ref_data = readtable('referance_omlc.xlsx');
+wavelength_ref = ref_data{:, 1};  % Wavelength column
+reflectance_ref1 = ref_data{:, 2};  % First reference spectrum
+reflectance_ref2 = ref_data{:, 3};  % Second reference spectrum
+
+% Normalize reference spectra
+reflectance_ref1_norm = (reflectance_ref1 - min(reflectance_ref1)) / ...
+                        (max(reflectance_ref1) - min(reflectance_ref1));
+reflectance_ref2_norm = (reflectance_ref2 - min(reflectance_ref2)) / ...
+                        (max(reflectance_ref2) - min(reflectance_ref2));
+
+% Define original wavelengths for the spectral bands
+wavelengths = [460, 520, 680];  % Match your spectral bands
+
+%% Initialize Parameters
+similarity_threshold = 0.50;  % Threshold for 50%
+max_iterations = 50;  % Maximum number of iterations
+num_refs = 2;  % Number of reference spectra
+
+% Initialize arrays to store the most correlated endmember data
+most_correlated_endmember = cell(1, num_refs);  % Store spectra of most correlated endmembers
+best_ssm_scores = zeros(1, num_refs);  % Store the best SSM scores for each reference
+
+%% SSM Function Definition (Spectral Similarity Measure)
+ssm = @(x, y) dot(x, y) / (norm(x) * norm(y));  % Cosine similarity
+
+%% Process Reference 1
+fprintf('Processing Reference 1...\n');
+for iteration = 1:max_iterations
+    fprintf('Iteration: %d\n', iteration);
+
+    % Perform VCA spectral unmixing
+    [umx, A, W] = unmix_M_vca_SM(xd, 2);  % Extracted Endmember Spectra (A)
+
+    % Interpolate extracted spectra to match reference wavelengths
+    extracted_interp = zeros(length(wavelength_ref), size(A, 2));
+    for i = 1:size(A, 2)
+        extracted_interp(:, i) = interp1(wavelengths, A(:, i), wavelength_ref, 'linear', 'extrap');
+    end
+
+    % Compute SSM for each endmember and Reference 1
+    ssm_scores = zeros(1, size(A, 2));
+    for i = 1:size(A, 2)
+        ssm_scores(i) = ssm(reflectance_ref1_norm, extracted_interp(:, i));
+    end
+
+    % Find the most correlated endmember for Reference 1
+    [best_ssm_scores(1), best_idx] = max(ssm_scores);
+    most_correlated_endmember{1} = extracted_interp(:, best_idx);
+
+    if best_ssm_scores(1) >= similarity_threshold
+        break;
+    end
+end
+fprintf('Best SSM Score for Reference 1: %.2f%%\n', best_ssm_scores(1) * 100);
+
+%% Process Reference 2
+fprintf('Processing Reference 2...\n');
+for iteration = 1:max_iterations
+    fprintf('Iteration: %d\n', iteration);
+
+    % Perform VCA spectral unmixing
+    [umx, A, W] = unmix_M_vca_SM(xd, 2);  % Extracted Endmember Spectra (A)
+
+    % Interpolate extracted spectra to match reference wavelengths
+    extracted_interp = zeros(length(wavelength_ref), size(A, 2));
+    for i = 1:size(A, 2)
+        extracted_interp(:, i) = interp1(wavelengths, A(:, i), wavelength_ref, 'linear', 'extrap');
+    end
+
+    % Compute SSM for each endmember and Reference 2
+    ssm_scores = zeros(1, size(A, 2));
+    for i = 1:size(A, 2)
+        ssm_scores(i) = ssm(reflectance_ref2_norm, extracted_interp(:, i));
+    end
+
+    % Find the most correlated endmember for Reference 2
+    [best_ssm_scores(2), best_idx] = max(ssm_scores);
+    most_correlated_endmember{2} = extracted_interp(:, best_idx);
+
+    if best_ssm_scores(2) >= similarity_threshold
+        break;
+    end
+end
+fprintf('Best SSM Score for Reference 2: %.2f%%\n', best_ssm_scores(2) * 100);
+
+%% Plot Results
+figure;
+hold on;
+
+% Plot Reference 1
+plot(wavelength_ref, reflectance_ref1_norm, 'r--', 'LineWidth', 1, 'DisplayName', 'Reference 1');
+
+% Plot Most Correlated Endmember for Reference 1
+plot(wavelength_ref, most_correlated_endmember{1}, 'b-', 'LineWidth', 2, ...
+     'DisplayName', 'Most Correlated Endmember 1');
+
+% Plot Reference 2
+plot(wavelength_ref, reflectance_ref2_norm, 'g--', 'LineWidth', 1, 'DisplayName', 'Reference 2');
+
+% Plot Most Correlated Endmember for Reference 2
+plot(wavelength_ref, most_correlated_endmember{2}, 'm-', 'LineWidth', 2, ...
+     'DisplayName', 'Most Correlated Endmember 2');
+
+% Add Labels, Legend, and Grid
+xlabel('Wavelength (nm)');
+ylabel('Normalized Reflectance');
+title('Reference Spectra and Most Correlated Endmembers');
+legend show;
+grid on;
+
+hold off;
