@@ -1,0 +1,37 @@
+function [umx, A, W] = unmix_M_vca_SM(image_M,n_components)
+
+%% input
+% changes the dimension of a 3D input matrix to 4D including Ns=1
+if length(size(image_M)) == 4 
+    [Nw, Ns, Npx, Npy]=size(image_M); % read the dimensions
+elseif length(size(image_M)) == 3
+    [Nw, Npx, Npy]=size(image_M); % read the dimensions
+    Ns = 1;
+    image_M = reshape(image_M,Nw,Ns,Npx,Npy); % and add Ns=1 dimension
+end
+
+image_M2 = zeros(Nw,Ns*Npx*Npy);
+image_M2 = reshape(image_M,Nw,Ns*Npx*Npy);
+image_M3 = permute(image_M2,[2 1]);
+
+%% vca
+
+Mat_aux = zeros(Nw,Nw); % matrix storing the already determined spectral components (columns of the matrix)
+Mat_aux(:,1) = ones(Nw,1)/sqrt(Nw); % initialize with a given 
+for kk=1:n_components
+    w = randn(Nw,1); % random vector
+    f_aux = (eye(Nw)-Mat_aux*pinv(Mat_aux))*w; % projection of the random vector normal to the subspace determined by the calculated components
+    f = f_aux/norm(f_aux); % normalize the vector
+    proj = image_M3*f; % projection of the observations on f
+    [max_val, pos_max] = max(abs(proj)); % computation of the maximum
+    maximo(kk) = max_val; % value of the maximum
+    value_aux = image_M3(pos_max,:).'; % observation corresponding to the maximum value of the projection (direction of the spectral component)
+    Mat_aux(:,kk) = value_aux/norm(value_aux); % storing the new spectral component (normalized)
+end
+
+A = Mat_aux(:,1:n_components);
+W = maximo;
+S = A;
+pinvS = pinv(S);
+umx_aux = pinvS*image_M2;
+umx = reshape(umx_aux,n_components,Ns,Npx,Npy);
