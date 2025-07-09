@@ -1,0 +1,41 @@
+% Project AgrIndia : Unmixing multispectral mobile data
+% PI: Tania Bera and Subhamoy Mandal
+% Developed by Subhamoy Mandal
+% May 2019 
+
+% demo script
+
+clear all 
+close all 
+
+%% image import
+
+rawData1 = importdata('red_osf_3.bmp');
+rawData2 = importdata('green_osf_3.bmp');
+rawData3 = importdata('blue_osf_3.bmp');
+
+% Image conversion to grayscale
+x1 = rgb2gray(rawData1);
+x2 = rgb2gray(rawData2);
+x3 = rgb2gray(rawData3);
+%MSP image matrix composition 
+xt(1,:,:)=x1;
+xt(2,:,:)=x2;
+xt(3,:,:)=x3;
+xd = im2double(xt);
+
+[umx, A, W] = unmix_M_vca_SM(xd,2);
+umxd = permute(umx,[3 4 1 2]);
+figure
+imagesc(-umxd(:,:,1))
+colormap jet; axis off; %colorbar
+%imsave
+figure
+imagesc(-umxd(:,:,2))
+colormap jet; axis off; %colorbar
+%imsave
+figure
+imagesc((umxd(:,:,1) - umxd(:,:,2))/2)
+colormap jet; axis off; colorbar
+% imsave
+%figure;plot(A)
