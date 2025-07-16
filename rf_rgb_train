@@ -11,11 +11,10 @@ from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from sklearn.metrics import classification_report, ConfusionMatrixDisplay
 from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC  # <-- Make sure this is properly aligned
 from imblearn.over_sampling import SMOTE
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-
+import joblib
 
 # ------------------- JSON Helper -------------------
 def load_coco_json(json_path):
@@ -87,8 +86,13 @@ def compute_shape_features(mask):
     }
 
 # ------------------- Feature Aggregation -------------------
-def extract_combined_features(root_folder, coco_json_path):
-    image_types = ["r_", "g_", "b_"]
+def extract_combined_features(root_folder, coco_json_path, mode="RGB"):
+    all_modes = {
+        "RGBW": ["r_", "g_", "b_", "w_"],
+        "RGB": ["r_", "g_", "b_"],
+        "W": ["w_"]
+    }
+    image_types = all_modes[mode]
     categories = ["n_ovary", "h_nc", "tumour"]
     coco_data = load_coco_json(coco_json_path)
     file_to_annotations = build_annotation_index(coco_data)
@@ -128,29 +132,19 @@ def extract_combined_features(root_folder, coco_json_path):
                         combined_feats_per_cat[cat].extend(full_feats)
 
             for cat, feat_list in combined_feats_per_cat.items():
-                if len(feat_list) == len(image_types) * (13 + 6):  # 13 texture + 6 shape per image type
+                if len(feat_list) == len(image_types) * (13 + 6):
                     all_features.append(feat_list)
                     all_labels.append(cat)
 
     return all_features, all_labels
 
 # ------------------- Classifier -------------------
-def train_with_random_forest(features, labels, title="Multichannel RGBW"):
+def train_with_random_forest(features, labels, title="Multichannel RGB"):
     print(f"📊 {title} | Encoding + Scaling + SMOTE...")
+
     le = LabelEncoder()
     y = le.fit_transform(labels)
-    scaler = MinMaxScaler()
-    X = scaler.fit_transform(features)
 
-    smote = SMOTE(random_state=42)
-
-
-import joblib  # <-- Add at top if not already
-
-def train_with_svm(features, labels, title="Multichannel RGBW - SVM", save_dir=None):
-    print(f"\n📊 {title} | Encoding + Scaling + SMOTE...")
-    le = LabelEncoder()
-    y = le.fit_transform(labels)
     scaler = MinMaxScaler()
     X = scaler.fit_transform(features)
 
@@ -162,44 +156,55 @@ def train_with_svm(features, labels, title="Multichannel RGBW - SVM", save_dir=N
     preds_all = []
     truths_all = []
 
-    clf = SVC(kernel='rbf', C=10, gamma='scale', probability=True)
+    clf = RandomForestClassifier(n_estimators=200, random_state=42)
 
     for train_idx, test_idx in rkf.split(X_resampled, y_resampled):
         X_train, X_test = X_resampled[train_idx], X_resampled[test_idx]
         y_train, y_test = y_resampled[train_idx], y_resampled[test_idx]
+
         clf.fit(X_train, y_train)
         preds = clf.predict(X_test)
         preds_all.extend(preds)
         truths_all.extend(y_test)
 
-    print(f"\n✅ Final Classification Report ({title}):")
+    print(f"\n✅ Final Classification Report ({title} - Random Forest):")
     print(classification_report(truths_all, preds_all, target_names=le.classes_))
 
     ConfusionMatrixDisplay.from_predictions(
         truths_all, preds_all, display_labels=le.classes_, cmap='Blues'
     )
-    plt.title(f"{title} Confusion Matrix")
+    plt.title(f"{title} Confusion Matrix (Random Forest)")
     plt.tight_layout()
     plt.show()
 
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        joblib.dump(clf, os.path.join(save_dir, "svm_model.pkl"))
-        joblib.dump(scaler, os.path.join(save_dir, "scaler.pkl"))
-        joblib.dump(le, os.path.join(save_dir, "label_encoder.pkl"))
-        print(f"💾 Model, scaler, and label encoder saved in: {save_dir}")
+    plt.figure(figsize=(10, 6))
+    importances = clf.feature_importances_
+    indices = np.argsort(importances)[::-1]
+    feature_names = [f"F{i}" for i in range(X.shape[1])]
+    plt.barh(range(len(indices)), importances[indices])
+    plt.yticks(range(len(indices)), [feature_names[i] for i in indices])
+    plt.xlabel("Feature Importance")
+    plt.title(f"{title} Feature Importances (Random Forest)")
+    plt.tight_layout()
+    plt.show()
 
+    model_save_dir = r"H:\ML_MSI\ROI_based\RF_RGB"
+    os.makedirs(model_save_dir, exist_ok=True)
+    joblib.dump(clf, os.path.join(model_save_dir, "random_forest_model.pkl"))
+    joblib.dump(scaler, os.path.join(model_save_dir, "scaler.pkl"))
+    joblib.dump(le, os.path.join(model_save_dir, "label_encoder.pkl"))
+    print(f"💾 Model, scaler, and label encoder saved to: {model_save_dir}")
 
-
+# ------------------- Entry Point -------------------
 if __name__ == "__main__":
     ROOT_IMAGE_FOLDER = r"H:\ML_MSI\ROI_based\vipul_annotation_1"
-    COCO_JSON_PATH = r"H:\Granulosa_data_1\vipul_annotation_1\annotation_27_05_25_vipul_3.json"
-    SVM_MODEL_DIR = r"H:\ML_MSI\ROI_based\SVM_RGB"  # <-- Where to save SVM model
+    COCO_JSON_PATH = r"H:\ML_MSI\ROI_based\vipul_annotation_1\annotation_27_05_25_vipul_3.json"
 
-    print("🔍 Extracting unified RGBW features...")
-    X_all, y_all = extract_combined_features(ROOT_IMAGE_FOLDER, COCO_JSON_PATH)
+    for mode in ["RGB"]:  # <<< CHANGED TO RGB ONLY
+        print(f"\n🔍 Extracting features for mode: {mode}...")
+        X_all, y_all = extract_combined_features(ROOT_IMAGE_FOLDER, COCO_JSON_PATH, mode=mode)
 
-    if not X_all:
-        print("❌ No features found for RGBW.")
-    else:
-        train_with_svm(X_all, y_all, title="Multichannel RGBW - SVM", save_dir=SVM_MODEL_DIR)
+        if not X_all:
+            print(f"❌ No features found for {mode} mode.")
+        else:
+            train_with_random_forest(X_all, y_all, title=f"Mode: {mode}")
